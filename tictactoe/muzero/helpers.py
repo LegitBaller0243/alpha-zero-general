@@ -115,6 +115,31 @@ def softmax_sample(distribution, temperature: float):
 
     return probabilities[actions.index(selected_action)], selected_action
 
+def visit_softmax_temperature(num_moves, training_steps):
+        if num_moves < 5:
+            return 1.0
+        else:
+            return 0.0  # Play according to the max.
+
+def make_tictactoe_config(action_space_size: int, max_moves: int,
+                           dirichlet_alpha: float,
+                           lr_init: float):
+
+    return MuZeroConfig(
+        action_space_size=action_space_size,
+        max_moves=9,
+        discount=1.0,
+        dirichlet_alpha=dirichlet_alpha,
+        num_simulations=20,  
+        batch_size=4,  
+        td_steps=max_moves,  #mone carlo
+        num_actors=2,
+        lr_init=lr_init,
+        lr_decay_steps=100,  
+        visit_softmax_temperature_fn=visit_softmax_temperature,
+        num_episodes=25,  
+        known_bounds=KnownBounds(-1, 1))
+
 import logging
 
 # Set up logging (ensures consistent logging across all files)

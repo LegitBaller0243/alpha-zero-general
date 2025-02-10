@@ -9,74 +9,81 @@ To Create:
 - NNet Wrapper (initial inference/recurrent inference)
 '''
 
-
 from ReplayBuffer import ReplayBuffer
 from Coach import Coach
 from T3NetWrapper import T3NetWrapper
 from Game import TicTacToeGame
-from helpers import MuZeroConfig, KnownBounds
-import traceback  
+from helpers import make_tictactoe_config
+from SharedStorage import SharedStorage
+import traceback
+import multiprocessing
+from multiprocessing import Value, Manager, Lock, Queue
+import logging
+from logging_config import setup_logging, log_listener  # Import logging setup
 
+def actor(global_steps, global_lock, training_losses, self_play_rewards, config, replay_buffer, storage):
+    """Runs self-play and training for MuZero in parallel."""
+
+    process_name = multiprocessing.current_process().name
+    logging.info(f"Process {process_name} started.")
+
+    coach = Coach(config, replay_buffer, global_steps, global_lock)  
+    for iteration in range(config.num_iterations):
+        logging.info(f'{process_name}: Starting Iteration {iteration + 1}')
+        
+        logging.info('Starting Self-Play...')
+        total_reward = coach.run_selfplay(storage)
+        
+        # Ensure safe write to shared list
+        with global_lock:
+            self_play_rewards.append(total_reward)
+
+        logging.info(f'Total Self-Play Reward: {total_reward}')
+
+        logging.info('Starting Training...')
+        avg_loss = coach.train_network(storage)
+
+        with global_lock:
+            training_losses.append(avg_loss)
+
+        logging.info(f"Average Loss: {avg_loss:.4f}")
 
 
 def main(config):
+    """Main function to launch multiple processes for MuZero training."""
+    queue = Queue()
+    setup_logging(queue)
+
+    listener = multiprocessing.Process(target=log_listener, args=(queue,))
+    listener.start()
+
     nnet = T3NetWrapper()
     replay_buffer = ReplayBuffer(config)
-    coach = Coach(config, nnet, replay_buffer)
+    storage = SharedStorage()
+    storage.save_network(0, nnet)
 
-    # Track metrics
-    training_losses = []
-    self_play_rewards = []
+    global_training_steps = Value('i', 0)
+    global_training_lock = Lock()
 
-    try:
-        for iteration in range(config.num_iterations):
-            print(f'\nStarting Iteration {iteration + 1}')
-            
-            print('Starting Self-Play...')
-            total_reward = coach.run_selfplay()  # Modify run_selfplay to return total reward
-            self_play_rewards.append(total_reward)
-            print(f"Total Self-Play Reward: {total_reward}")
-            
-            print('Starting Training...')
-            avg_loss = coach.train_network()
-            training_losses.append(avg_loss)
-            print(f"Average Loss: {avg_loss:.4f}")
-            
-            if iteration % config.checkpoint_interval == 0:
-                nnet.save_checkpoint()
-                
-    except Exception as e:
-        print(f"Error during training: {e}")
-        print("Full traceback:")
-        traceback.print_exc()  # This will print the full stack trace with line numbers
-        nnet.save_checkpoint(filename='error_checkpoint.pth.tar')
-            
-    return nnet
+    manager = Manager()
+    training_losses = manager.list()  
+    self_play_rewards = manager.list()  
 
-def make_tictactoe_config(action_space_size: int, max_moves: int,
-                           dirichlet_alpha: float,
-                           lr_init: float):
+    processes = []
+    for _ in range(config.num_actors):
+        p = multiprocessing.Process(target=actor, args=(
+            global_training_steps, global_training_lock, training_losses, self_play_rewards, config, replay_buffer, storage))
+        p.start()
+        processes.append(p)
 
-  def visit_softmax_temperature(num_moves, training_steps):
-    if num_moves < 5:
-      return 1.0
-    else:
-      return 0.0  # Play according to the max.
+    for p in processes:
+        p.join()  # Wait for all processes to finish
 
-  return MuZeroConfig(
-      action_space_size=action_space_size,
-      max_moves=9,
-      discount=1.0,
-      dirichlet_alpha=dirichlet_alpha,
-      num_simulations=50,
-      batch_size=32,
-      td_steps=max_moves,  # Always use Monte Carlo return.
-      num_actors=100,
-      lr_init=lr_init,
-      lr_decay_steps=1000,
-      visit_softmax_temperature_fn=visit_softmax_temperature,
-      num_episodes=100,
-      known_bounds=KnownBounds(-1, 1))
+    # Stop the logging listener
+    queue.put("STOP")
+    listener.join()
+
+    return storage.latest_network()
 
 if __name__ == "__main__":
     config = make_tictactoe_config(9, 9, .3, .001)

@@ -4,45 +4,50 @@ import torch.nn.functional as F
 import numpy
 from helpers import *
 from utils import Node
+import logging
+
+from T3NetWrapper import T3NetWrapper
 
 
 class Coach():
-    def __init__(self, config, nnet, replay_buffer):
+    def __init__(self, config, replay_buffer, global_training_steps, global_lock):
         self.config = config
-        self.nnet = nnet
         self.replay_buffer = replay_buffer
+        self.global_training_steps = global_training_steps
+        self.global_lock = global_lock  # Store the lock
 
     ####### Self-Play ########
-    def run_selfplay(self):
+    def run_selfplay(self, storage):
         total_reward = 0
         for _ in range(self.config.num_episodes):
-            game = self.play_game()
+            network = storage.latest_network()
+            game = self.play_game(network)
             self.replay_buffer.save_game(game)
             total_reward += game.get_reward()
-            logger.info(f"Completed Self-Play Game: Total Moves: {len(game.history)}, Total Reward: {game.get_reward()}")
+            logging.info(f"Completed Self-Play Game: Total Moves: {len(game.history)}, Total Reward: {game.get_reward()}")
         
         return total_reward
 
 
-    def play_game(self):
+    def play_game(self, nnet):
         game = self.config.new_game()
 
         while not game.terminal() and len(game.history) < self.config.max_moves:
             root = Node(0)
             current_observation = game.make_image(-1)
             self.expand_node(root, game.to_play(), game.legal_actions(),
-                    self.nnet.initial_inference(current_observation))
+                    nnet.initial_inference(current_observation))
             self.add_exploration_noise(root)
 
-            self.run_mcts(root, game.action_history())
-            action = self.select_action(len(game.history), root)
+            self.run_mcts(root, game.action_history(), nnet)
+            action = self.select_action(len(game.history), root, nnet)
             game.apply(action)
             game.store_search_statistics(root)
         return game
 
 
    
-    def run_mcts(self, root, action_history):
+    def run_mcts(self, root, action_history, nnet):
         min_max_stats = MinMaxStats(self.config.known_bounds)
 
         for _ in range(self.config.num_simulations):
@@ -57,7 +62,7 @@ class Coach():
 
 
             parent = search_path[-2]
-            network_output = self.nnet.recurrent_inference(parent.hidden_state,
+            network_output = nnet.recurrent_inference(parent.hidden_state,
                                                             history.last_action())
             self.expand_node(node, history.to_play(), history.action_space(), network_output)
 
@@ -65,12 +70,12 @@ class Coach():
                             self.config.discount, min_max_stats)
 
 
-    def select_action(self, num_moves, node):
+    def select_action(self, num_moves, node, nnet):
         visit_counts = [
             (child.visit_count, action) for action, child in node.children.items()
         ]
         t = self.config.visit_softmax_temperature_fn(
-            num_moves=num_moves, training_steps=self.nnet.training_steps())
+            num_moves=num_moves, training_steps=nnet.training_steps())
         _, action = softmax_sample(visit_counts, t)
         return action
 
@@ -127,40 +132,43 @@ class Coach():
 
     ####### Part 2: Training #########
 
-    def train_network(self):
+    def train_network(self, storage):
         total_loss = 0
         n_steps = 0
+        network = T3NetWrapper()
         
         learning_rate = self.config.lr_init * self.config.lr_decay_rate**(
-            self.nnet.training_steps() / self.config.lr_decay_steps)
-        optimizer = torch.optim.SGD(list(self.nnet.representations.parameters()) + 
-                                        list(self.nnet.dynamics.parameters()) + 
-                                        list(self.nnet.predictions.parameters()), 
-                                        lr=learning_rate, momentum=self.config.momentum
+            self.global_training_steps.value / self.config.lr_decay_steps)
+        optimizer = torch.optim.SGD(list(network.representations.parameters()) + 
+                                        list(network.dynamics.parameters()) + 
+                                        list(network.predictions.parameters()), 
+                                        lr=learning_rate, momentum=self.config.momentum, 
+                                        weight_decay=0.0001
                                     )
 
         for i in range(self.config.training_steps):
             if i % self.config.checkpoint_interval == 0:
-                self.nnet.save_checkpoint()
+                with self.global_lock:
+                    storage.save_network(self.global_training_steps.value, network)
             batch = self.replay_buffer.sample_batch(self.config.num_unroll_steps, self.config.td_steps)
-            loss = self.update_weights(optimizer, batch, self.config.weight_decay)
+            loss = self.update_weights(optimizer, batch, self.config.weight_decay, network)
             total_loss += loss
             n_steps += 1
-            logger.info(f"Training Step: {self.nnet.training_steps()}, Learning Rate: {learning_rate}")
-
-            ### storage.save_network(config.training_steps, network)
+            logging.info(f"Training Step: {self.global_training_steps.value}, Learning Rate: {learning_rate}")
+            with self.global_lock:
+                storage.save_network(self.global_training_steps.value, network)
 
         return total_loss / n_steps if n_steps > 0 else 0
 
 
-    def update_weights(self, optimizer, batch, weight_decay):
+    def update_weights(self, optimizer, batch, weight_decay, network):
         loss = 0
         for image, actions, targets in batch:
-            value, reward, policy_logits, hidden_state = self.nnet.initial_inference(image)
+            value, reward, policy_logits, hidden_state = network.initial_inference(image)
             predictions = [(1.0, value, reward, policy_logits)]
 
             for action in actions:
-                value, reward, policy_logits, hidden_state = self.nnet.recurrent_inference(
+                value, reward, policy_logits, hidden_state = network.recurrent_inference(
                     hidden_state, action)
                 predictions.append((1.0 / len(actions), value, reward, policy_logits))
 
@@ -174,11 +182,9 @@ class Coach():
                 if not target_policy:  
                     continue
 
-                # Fix value and reward shapes to match [1, 1]
                 target_value = torch.tensor(target_value, dtype=torch.float32).view(1, 1)
                 target_reward = torch.tensor(target_reward, dtype=torch.float32).view(1, 1)
                 
-                # Specify dimension for argmax
                 target_policy_tensor = torch.argmax(torch.tensor(target_policy, dtype=torch.float32), dim=0).view(1)
 
                 l = (
@@ -188,23 +194,19 @@ class Coach():
 
                 loss += l * gradient_scale
 
-        for net in self.nnet.get_weights():
-            for param in net.values():  
-                loss += weight_decay * torch.norm(param, p=2) ** 2
-
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.nnet.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(network.get_weights(), max_norm=1.0)
         optimizer.step()
 
-        self.nnet.training_step_count += 1
-        logger.info(f"Training Step: {self.nnet.training_step_count}, Loss: {loss.item()}")
+        with self.global_lock:  
+            self.global_training_steps.value += 1  
+            logging.info(f"Training Step: {self.global_training_steps.value}, Loss: {loss.item()}")
 
         return loss.item()
 
 
     def scalar_loss(self, prediction, target):
-    # MSE in board games, cross entropy between categorical values in Atari.
         return F.mse_loss(prediction, target)
 
     ######### End Training ###########

@@ -6,8 +6,11 @@
 /.pydevproject
 
 # checkpoint
-checkpoints/
+checkpoint/
 
+research/
+
+*.log
 # For PyCharm users
 .idea/
 

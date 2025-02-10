@@ -21,6 +21,7 @@ class T3NetWrapper:
         self.representations, self.predictions, self.dynamics = self.nnet.getnets()
 
         self.training_step_count = 0
+
     def initial_inference(self, image):
     # representation + prediction function
 
@@ -36,12 +37,12 @@ class T3NetWrapper:
         return NetworkOutput(value.detach(), reward.detach(), policy_logits, new_hidden)
 
     def get_weights(self):
-        # Returns the weights of this network.
-        return [
-            self.representations.state_dict(),
-            self.dynamics.state_dict(),
-            self.predictions.state_dict(),
-        ]
+        # Returns the weights of this network as a flat list of parameters.
+        return (
+            list(self.representations.parameters()) +
+            list(self.dynamics.parameters()) +
+            list(self.predictions.parameters())
+        )
     def training_steps(self):
         # How many steps / batches the network has been trained for.
         return self.training_step_count
