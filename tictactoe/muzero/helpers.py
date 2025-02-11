@@ -52,7 +52,7 @@ class MuZeroConfig(object):
     self.max_moves = max_moves
     self.num_simulations = num_simulations
     self.discount = discount
-    self.num_iterations = 15
+    self.num_iterations = 5
 
     # Root prior exploration noise.
     self.root_dirichlet_alpha = dirichlet_alpha
@@ -69,12 +69,12 @@ class MuZeroConfig(object):
     self.known_bounds = known_bounds
 
     ### Training
-    self.training_steps = 6
+    self.training_steps = 2
     self.checkpoint_interval = 5
     self.num_episodes = num_episodes
-    self.window_size = 1000
+    self.window_size = 10
     self.batch_size = batch_size
-    self.num_unroll_steps = 5
+    self.num_unroll_steps = 3
     self.td_steps = td_steps
 
     self.weight_decay = 1e-4
@@ -130,14 +130,14 @@ def make_tictactoe_config(action_space_size: int, max_moves: int,
         max_moves=9,
         discount=1.0,
         dirichlet_alpha=dirichlet_alpha,
-        num_simulations=20,  
+        num_simulations=5,  
         batch_size=4,  
         td_steps=max_moves,  #mone carlo
-        num_actors=2,
+        num_actors=1,
         lr_init=lr_init,
-        lr_decay_steps=100,  
+        lr_decay_steps=500,  
         visit_softmax_temperature_fn=visit_softmax_temperature,
-        num_episodes=25,  
+        num_episodes=10,  
         known_bounds=KnownBounds(-1, 1))
 
 import logging

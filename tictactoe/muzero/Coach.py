@@ -24,7 +24,7 @@ class Coach():
             game = self.play_game(network)
             self.replay_buffer.save_game(game)
             total_reward += game.get_reward()
-            logging.info(f"Completed Self-Play Game: Total Moves: {len(game.history)}, Total Reward: {game.get_reward()}")
+            ##logging.info(f"Completed Self-Play Game: Total Moves: {len(game.history)}, Total Reward: {game.get_reward()}")
         
         return total_reward
 
@@ -143,7 +143,7 @@ class Coach():
                                         list(network.dynamics.parameters()) + 
                                         list(network.predictions.parameters()), 
                                         lr=learning_rate, momentum=self.config.momentum, 
-                                        weight_decay=0.0001
+                                        weight_decay=self.config.weight_decay
                                     )
 
         for i in range(self.config.training_steps):
@@ -151,17 +151,17 @@ class Coach():
                 with self.global_lock:
                     storage.save_network(self.global_training_steps.value, network)
             batch = self.replay_buffer.sample_batch(self.config.num_unroll_steps, self.config.td_steps)
-            loss = self.update_weights(optimizer, batch, self.config.weight_decay, network)
+            loss = self.update_weights(optimizer, batch, network)
             total_loss += loss
             n_steps += 1
-            logging.info(f"Training Step: {self.global_training_steps.value}, Learning Rate: {learning_rate}")
+            ##logging.info(f"Training Step: {self.global_training_steps.value}, Learning Rate: {learning_rate}")
             with self.global_lock:
                 storage.save_network(self.global_training_steps.value, network)
 
         return total_loss / n_steps if n_steps > 0 else 0
 
 
-    def update_weights(self, optimizer, batch, weight_decay, network):
+    def update_weights(self, optimizer, batch, network):
         loss = 0
         for image, actions, targets in batch:
             value, reward, policy_logits, hidden_state = network.initial_inference(image)
@@ -186,7 +186,7 @@ class Coach():
                 target_reward = torch.tensor(target_reward, dtype=torch.float32).view(1, 1)
                 
                 target_policy_tensor = torch.argmax(torch.tensor(target_policy, dtype=torch.float32), dim=0).view(1)
-
+                print("value then reward")
                 l = (
                     self.scalar_loss(value, target_value) +
                     self.scalar_loss(reward, target_reward) +
@@ -201,13 +201,16 @@ class Coach():
 
         with self.global_lock:  
             self.global_training_steps.value += 1  
-            logging.info(f"Training Step: {self.global_training_steps.value}, Loss: {loss.item()}")
+            ##logging.info(f"Training Step: {self.global_training_steps.value}, Loss: {loss.item()}")
 
         return loss.item()
 
 
     def scalar_loss(self, prediction, target):
-        return F.mse_loss(prediction, target)
+        if isinstance(prediction, (int, float)):  
+            prediction_tensor = torch.tensor(prediction, dtype=torch.float32).view(1, 1)
+
+        return F.mse_loss(prediction_tensor, target)
 
     ######### End Training ###########
 

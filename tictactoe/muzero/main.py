@@ -22,7 +22,6 @@ import logging
 from logging_config import setup_logging, log_listener  # Import logging setup
 
 def actor(global_steps, global_lock, training_losses, self_play_rewards, config, replay_buffer, storage):
-    """Runs self-play and training for MuZero in parallel."""
 
     process_name = multiprocessing.current_process().name
     logging.info(f"Process {process_name} started.")
@@ -50,7 +49,6 @@ def actor(global_steps, global_lock, training_losses, self_play_rewards, config,
 
 
 def main(config):
-    """Main function to launch multiple processes for MuZero training."""
     queue = Queue()
     setup_logging(queue)
 
@@ -82,9 +80,12 @@ def main(config):
     # Stop the logging listener
     queue.put("STOP")
     listener.join()
-
+    
+    print([(i, reward) for i, reward in enumerate(self_play_rewards)])
+    print([(i, loss) for i, loss in enumerate(training_losses)])
     return storage.latest_network()
-
+## start-time: 13:01:09
+#fix broadcasting
 if __name__ == "__main__":
     config = make_tictactoe_config(9, 9, .3, .001)
     best_network = main(config)
