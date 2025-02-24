@@ -11,15 +11,16 @@ To Create:
 
 from ReplayBuffer import ReplayBuffer
 from Coach import Coach
+from Arena import Arena
 from T3NetWrapper import T3NetWrapper
 from Game import TicTacToeGame
 from helpers import make_tictactoe_config
+from utils import plot_results
 from SharedStorage import SharedStorage
-import traceback
 import multiprocessing
 from multiprocessing import Value, Manager, Lock, Queue
 import logging
-from logging_config import setup_logging, log_listener  # Import logging setup
+from logging_config import setup_logging, log_listener  
 
 def actor(global_steps, global_lock, training_losses, self_play_rewards, config, replay_buffer, storage):
 
@@ -84,8 +85,24 @@ def main(config):
     print([(i, reward) for i, reward in enumerate(self_play_rewards)])
     print([(i, loss) for i, loss in enumerate(training_losses)])
     return storage.latest_network()
-## start-time: 13:01:09
-#fix broadcasting
+
 if __name__ == "__main__":
-    config = make_tictactoe_config(9, 9, .3, .001)
+    config = make_tictactoe_config(9, 9, .6, .005)
     best_network = main(config)
+
+    # Play against a random player
+    arena = Arena(best_network, T3NetWrapper())
+    wins, losses, draws = arena.playRandom(best_network, TicTacToeGame(), num_games=100)
+    combined_percentage = (wins + draws) / 100
+    log_message = f"""
+    📊 {'='*30} 📊
+    🎮 Arena Results Summary:
+    ------------------------------
+    ✅ Wins: {wins} 
+    ❌ Losses: {losses} 
+    🤝 Draws: {draws}
+    ------------------------------
+    ✨ Win + Draw Percentage: {combined_percentage:.2f}% ✨
+    📊 {'='*30} 📊
+    """
+    print(log_message)

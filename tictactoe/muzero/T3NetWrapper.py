@@ -28,13 +28,13 @@ class T3NetWrapper:
         #turn image into a tensor
         hidden_state = self.representations(image)
         policy_logits, value = self.predictions(hidden_state)
-        return NetworkOutput(value.detach(), torch.tensor(0.0), policy_logits, hidden_state)
+        return NetworkOutput(value, torch.tensor(0.0), policy_logits, hidden_state)
 
     def recurrent_inference(self, hidden_state, action):
         # dynamics + prediction function
         new_hidden, reward = self.dynamics(hidden_state, action)
         policy_logits, value = self.predictions(new_hidden)
-        return NetworkOutput(value.detach(), reward.detach(), policy_logits, new_hidden)
+        return NetworkOutput(value, reward, policy_logits, new_hidden)
 
     def get_weights(self):
         # Returns the weights of this network as a flat list of parameters.

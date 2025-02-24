@@ -1,4 +1,8 @@
 import numpy as np
+
+import logging
+logger = logging.getLogger(__name__)
+
 class ReplayBuffer(object):
 
   def __init__(self, config):
@@ -14,6 +18,7 @@ class ReplayBuffer(object):
   def sample_batch(self, num_unroll_steps: int, td_steps: int):
     games = [self.sample_game() for _ in range(self.batch_size)]
     game_pos = [(g, self.sample_position(g)) for g in games]
+    ##logger.info(f"Games: {games}")
     return [(g.make_image(i), g.history[i:i + num_unroll_steps],
              g.make_target(i, num_unroll_steps, td_steps))
             for (g, i) in game_pos]

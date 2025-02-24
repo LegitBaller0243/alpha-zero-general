@@ -52,11 +52,11 @@ class MuZeroConfig(object):
     self.max_moves = max_moves
     self.num_simulations = num_simulations
     self.discount = discount
-    self.num_iterations = 5
+    self.num_iterations = 40
 
     # Root prior exploration noise.
     self.root_dirichlet_alpha = dirichlet_alpha
-    self.root_exploration_fraction = 0.25
+    self.root_exploration_fraction = 0.4
 
     # UCB formula
     self.pb_c_base = 19652
@@ -69,16 +69,17 @@ class MuZeroConfig(object):
     self.known_bounds = known_bounds
 
     ### Training
-    self.training_steps = 2
-    self.checkpoint_interval = 5
+    self.training_steps = 15
+    self.checkpoint_interval = 50
     self.num_episodes = num_episodes
-    self.window_size = 10
+    self.window_size = 175
     self.batch_size = batch_size
-    self.num_unroll_steps = 3
+    self.num_unroll_steps = 4
     self.td_steps = td_steps
 
     self.weight_decay = 1e-4
     self.momentum = 0.9
+    self.threshold = 0.60
 
     # Exponential learning rate schedule
     self.lr_init = lr_init
@@ -117,9 +118,10 @@ def softmax_sample(distribution, temperature: float):
 
 def visit_softmax_temperature(num_moves, training_steps):
         if num_moves < 5:
-            return 1.0
+          return .9  # mostly exploration for early moves
         else:
-            return 0.0  # Play according to the max.
+          return .1  # mostly exploitation in the late game
+
 
 def make_tictactoe_config(action_space_size: int, max_moves: int,
                            dirichlet_alpha: float,
@@ -130,14 +132,14 @@ def make_tictactoe_config(action_space_size: int, max_moves: int,
         max_moves=9,
         discount=1.0,
         dirichlet_alpha=dirichlet_alpha,
-        num_simulations=5,  
-        batch_size=4,  
-        td_steps=max_moves,  #mone carlo
+        num_simulations=30,  
+        batch_size=10,  
+        td_steps=max_moves,  #monte carlo
         num_actors=1,
         lr_init=lr_init,
-        lr_decay_steps=500,  
+        lr_decay_steps=1000,  
         visit_softmax_temperature_fn=visit_softmax_temperature,
-        num_episodes=10,  
+        num_episodes=50,  
         known_bounds=KnownBounds(-1, 1))
 
 import logging

@@ -1,6 +1,10 @@
 import numpy as np
 from typing import List
 from utils import ActionHistory, Action
+import logging
+logger = logging.getLogger(__name__)
+
+
 
 class Game:
     """A single episode of interaction with the environment (MuZero-compatible)."""
@@ -34,11 +38,13 @@ class Game:
         sum_visits = sum(child.visit_count for child in root.children.values())
         ## this is different - deepMind did (Action(index))
         action_space = [Action(i) for i in range(self.action_space_size)]
-        self.child_visits.append([
-            root.children[a].visit_count / sum_visits if a in root.children else 0
-            for a in action_space
-        ])
+        normalized_visits = [ root.children[a].visit_count / sum_visits if a in root.children else 0
+        for a in action_space ]
+        ##logger.info(f"[Search Statistics] Child visits: {normalized_visits}")
+    # Store visits
+        self.child_visits.append(normalized_visits)
         self.root_values.append(root.value())
+
 
     def make_image(self, state_index):
         if not self.states:
