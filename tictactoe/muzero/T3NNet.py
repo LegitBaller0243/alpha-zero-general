@@ -43,19 +43,18 @@ class PredictionsNet(nn.Module):
         super(PredictionsNet, self).__init__()
         ## takes a hidden state and ouputs a policy and value prediction
         ## given some hidden state which is 128 dimensions -> create a policy and a value
-        self.l1 = nn.Linear(hidden_size, 64)
-        self.policy_hidden = nn.Linear(64, 32)
-        self.policy = nn.Linear(32, action_size)
-        self.value = nn.Linear(64, 1)
+        self.l1 = nn.Linear(hidden_size, 128)
+        self.policy_hidden = nn.Linear(128, 64)
+        self.policy = nn.Linear(64, action_size)
+        self.value = nn.Linear(128, 1)
     def forward(self, x):
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
         x = F.relu(self.l1(x))
         p = F.relu(self.policy_hidden(x))
         sharp_policy_logits = self.policy(p) / 0.5  # Temperature < 1 sharpens the distribution
-        policy_logits = F.softmax(sharp_policy_logits, dim=-1)
         value = torch.tanh(self.value(x))
-        return policy_logits, value
+        return sharp_policy_logits, value
 class DynamicsNet(nn.Module):
     def __init__(self, action_size, hidden_size):
         super(DynamicsNet, self).__init__()

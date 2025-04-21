@@ -69,21 +69,21 @@ class MuZeroConfig(object):
     self.known_bounds = known_bounds
 
     ### Training
-    self.training_steps = 15
-    self.checkpoint_interval = 50
+    self.training_steps = 50
+    self.checkpoint_interval = 150
     self.num_episodes = num_episodes
-    self.window_size = 175
+    self.window_size = 400
     self.batch_size = batch_size
     self.num_unroll_steps = 4
     self.td_steps = td_steps
 
-    self.weight_decay = 1e-4
+    self.weight_decay = 5e-5
     self.momentum = 0.9
     self.threshold = 0.60
 
     # Exponential learning rate schedule
     self.lr_init = lr_init
-    self.lr_decay_rate = 0.1
+    self.lr_decay_rate = 0.7
     self.lr_decay_steps = lr_decay_steps
 
   def new_game(self):
@@ -117,10 +117,14 @@ def softmax_sample(distribution, temperature: float):
     return probabilities[actions.index(selected_action)], selected_action
 
 def visit_softmax_temperature(num_moves, training_steps):
-        if num_moves < 5:
-          return .9  # mostly exploration for early moves
-        else:
-          return .1  # mostly exploitation in the late game
+      base_temp = max(0.3, 1.0 - training_steps / 10000)  
+      if num_moves < 3:
+          return min(1.5, base_temp * 2)  # Higher exploration early
+      elif num_moves < 6:
+          return base_temp  
+      else:
+          return max(0.1, base_temp * 0.5)  # More exploitation late-game
+
 
 
 def make_tictactoe_config(action_space_size: int, max_moves: int,
@@ -132,14 +136,14 @@ def make_tictactoe_config(action_space_size: int, max_moves: int,
         max_moves=9,
         discount=1.0,
         dirichlet_alpha=dirichlet_alpha,
-        num_simulations=30,  
-        batch_size=10,  
+        num_simulations=35,  
+        batch_size=32,  
         td_steps=max_moves,  #monte carlo
         num_actors=1,
         lr_init=lr_init,
-        lr_decay_steps=1000,  
+        lr_decay_steps=2000,  
         visit_softmax_temperature_fn=visit_softmax_temperature,
-        num_episodes=50,  
+        num_episodes=30,  
         known_bounds=KnownBounds(-1, 1))
 
 import logging

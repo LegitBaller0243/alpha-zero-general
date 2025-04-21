@@ -1,5 +1,5 @@
 ## complete constructor (__init__) method
-import torch
+import torch, copy
 import torch.nn.functional as F
 import numpy, random
 from helpers import *
@@ -68,7 +68,11 @@ class Coach():
             parent = search_path[-2]
             network_output = nnet.recurrent_inference(parent.hidden_state,
                                                             history.last_action())
-            self.expand_node(node, history.to_play(), history.action_space(), network_output)
+            
+            
+
+            legal_actions = list(set(history.action_space()) - set(history.history))
+            self.expand_node(node, history.to_play(), legal_actions, network_output)
 
             self.backpropagate(search_path, network_output.value, history.to_play(),
                             self.config.discount, min_max_stats)
@@ -78,8 +82,10 @@ class Coach():
         visit_counts = [
             (child.visit_count, action) for action, child in node.children.items()
         ]
-        ## if random.random() > .95: 
-            ## logger.info(f"Visit Counts: {visit_counts}")
+        ##if num_moves > 2 and random.random() > .80:  # Avoid early noise
+            ##logger.info(f"MCTS visit counts at move {num_moves}: {visit_counts}")
+
+
         t = self.config.visit_softmax_temperature_fn(
             num_moves=num_moves, training_steps=nnet.training_steps())
         _, action = softmax_sample(visit_counts, t)
@@ -104,17 +110,26 @@ class Coach():
         return prior_score + value_score
 
 
-    def expand_node(self, node, to_play, actions, network_output):
+    def expand_node(self, node, to_play, legal_actions, network_output):
         node.to_play = to_play
         node.hidden_state = network_output.hidden_state
         node.reward = network_output.reward
-        policy_logits_list = network_output.policy_logits.squeeze(0).tolist()
 
-        policy = {a: policy_logits_list[i] for i, a in enumerate(actions)}
+        logits = network_output.policy_logits.squeeze(0).detach()
+        mask = torch.full_like(logits, float('-inf'))
 
-        policy_sum = sum(policy.values())
-        for action, p in policy.items():
-            node.children[action] = Node(p / policy_sum)
+        for a in legal_actions:
+            mask[a] = logits[a]
+
+        policy_probs = F.softmax(mask, dim=0).cpu().numpy()
+
+        ##logger.info(f"For these legal_actions: {legal_actions} use this policy {policy_probs}")
+
+        for a in legal_actions:
+            node.children[a] = Node(policy_probs[a])
+
+
+
 
 
 
@@ -139,17 +154,18 @@ class Coach():
     def train_network(self, storage):
         total_loss = 0
         n_steps = 0
-        new_network = T3NetWrapper()
+        old_network = storage.latest_network()
+        new_network = copy.deepcopy(old_network)
         
 
 
         learning_rate = self.config.lr_init * self.config.lr_decay_rate**(
             self.global_training_steps.value / self.config.lr_decay_steps)
-        optimizer = torch.optim.SGD(
+        optimizer = torch.optim.Adam(
             list(new_network.representations.parameters()) + 
             list(new_network.dynamics.parameters()) + 
             list(new_network.predictions.parameters()), 
-            lr=learning_rate, momentum=self.config.momentum, 
+            lr=learning_rate, 
             weight_decay=self.config.weight_decay
         )
 
@@ -163,11 +179,10 @@ class Coach():
             n_steps += 1
 
         # Evaluate the new network against the old one
-        old_network = storage.latest_network()
         arena = Arena(new_network, old_network, display=None)
-        new_wins, old_wins, draws = arena.playGames(15, verbose=False)
+        new_wins, old_wins, draws = arena.playGames(20, verbose=False)
 
-        if new_wins + draws / (new_wins + old_wins + draws) > self.config.threshold:  
+        if (new_wins + draws/2) / 20 > self.config.threshold:  
             with self.global_lock:
                 storage.save_network(self.global_training_steps.value, new_network)
         else:
@@ -179,8 +194,16 @@ class Coach():
 
     def update_weights(self, optimizer, batch, network):
         loss = 0
-        value_loss_coef = 1.10
-        policy_coef = 1.5
+        training_progress = min(1.0, self.global_training_steps.value / 5000)
+        value_loss_coef = 1.0
+        policy_coef = 3.0 + 3.0 * training_progress  
+
+
+        '''if random.random() < 0.01:
+            logger.info(f"[Replay Buffer Check] Sampled target policies:")
+            for _, _, targets in batch[:3]:
+                logger.info([t[2] for t in targets])  # Show first few target policies'''
+
         for image, actions, targets in batch:
             value, reward, policy_logits, hidden_state = network.initial_inference(image)
             predictions = [(1.0, value, reward, policy_logits)]
@@ -201,22 +224,27 @@ class Coach():
                 target_reward = torch.tensor(target_reward, dtype=torch.float32).view(1, 1)
                 
                 target_policy_tensor = torch.tensor(target_policy, dtype=torch.float32).unsqueeze(0)
-                '''if random.random() >= .99:
-                    logger.info(
-                        f"Predicted Value: {value.item():.4f}, Target Value: {target_value.item():.4f}, "
-                        f"Predicted Reward: {reward.item():.4f}, Target Reward: {target_reward.item():.4f}, "
-                    )
+                if random.random() >= .9999:
+                    predicted_action = int(torch.argmax(policy_logits).item())
+                    target_action = int(np.argmax(target_policy))
+                    logger.info(f"[Policy Match] Predicted: {predicted_action} | Target: {target_action} | Match: {predicted_action == target_action}")
                     logger.info(
                         f"Predicted Policy (softmax): {F.softmax(policy_logits, dim=-1).detach().cpu().numpy()}, "
                         f"Target Policy: {target_policy}"
-                    )'''
+                    )
+
+                target_index = torch.tensor([int(np.argmax(target_policy))])
 
 
+                ce_loss = F.cross_entropy(policy_logits, target_index)
 
                 l = (
                     self.scalar_loss(value, target_value) * value_loss_coef +
                     self.scalar_loss(reward, target_reward) + policy_coef 
-                    * F.kl_div(F.log_softmax(policy_logits, dim=-1), target_policy_tensor, reduction='batchmean'))
+                    * ce_loss)
+
+
+
 
                 loss += l * gradient_scale
 
@@ -230,13 +258,25 @@ class Coach():
                 logger.info(f"Param {i} - Gradient Norm: {grad_norm:.6f}")
             else:
                 logger.warning(f"Param {i} - No Gradient!")'''
+        
 
-        ###torch.nn.utils.clip_grad_norm_(network.get_weights(), max_norm=1.0)
+
+        torch.nn.utils.clip_grad_norm_(network.get_weights(), max_norm=3.0)
+        old_params = [p.clone().detach() for p in network.get_weights()]
+
         optimizer.step()
+        
+        new_params = [p.clone().detach() for p in network.get_weights()]
+        total_change = sum((o - n).abs().sum().item() for o, n in zip(old_params, new_params))
+
+        if random.random() < 0.05:
+            logger.info(f"Total parameter change after update: {total_change:.6f}")
+            if total_change < 1e-6:
+                logger.warning("❗ Model weights not changing! Check gradients and optimizer.")
+
 
         with self.global_lock:  
             self.global_training_steps.value += 1  
-            ##logging.info(f"Training Step: {self.global_training_steps.value}, Loss: {loss.item()}")
 
         return loss.item()
 

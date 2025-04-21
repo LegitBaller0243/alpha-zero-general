@@ -38,8 +38,18 @@ class Game:
         sum_visits = sum(child.visit_count for child in root.children.values())
         ## this is different - deepMind did (Action(index))
         action_space = [Action(i) for i in range(self.action_space_size)]
-        normalized_visits = [ root.children[a].visit_count / sum_visits if a in root.children else 0
-        for a in action_space ]
+        
+        
+        temperature = 0.25  # Lower values make distributions sharper
+
+        visits = np.array([
+            root.children[a].visit_count if a in root.children else 0
+            for a in action_space
+        ], dtype=np.float32)
+
+        visits = visits ** (1 / temperature)
+        normalized_visits = (visits / np.sum(visits)).tolist()
+
         ##logger.info(f"[Search Statistics] Child visits: {normalized_visits}")
     # Store visits
         self.child_visits.append(normalized_visits)

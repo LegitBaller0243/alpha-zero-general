@@ -82,18 +82,18 @@ def main(config):
     queue.put("STOP")
     listener.join()
     
-    print([(i, reward) for i, reward in enumerate(self_play_rewards)])
-    print([(i, loss) for i, loss in enumerate(training_losses)])
+    ##print([(i, reward) for i, reward in enumerate(self_play_rewards)])
+    ##print([(i, loss) for i, loss in enumerate(training_losses)])
     return storage.latest_network()
 
 if __name__ == "__main__":
-    config = make_tictactoe_config(9, 9, .6, .005)
+    config = make_tictactoe_config(9, 9, .6, .01)
     best_network = main(config)
 
     # Play against a random player
     arena = Arena(best_network, T3NetWrapper())
-    wins, losses, draws = arena.playRandom(best_network, TicTacToeGame(), num_games=100)
-    combined_percentage = (wins + draws) / 100
+    wins, losses, draws = arena.playRandom(best_network, TicTacToeGame(), num_games=125)
+    combined_percentage = (wins + draws) / 125
     log_message = f"""
     📊 {'='*30} 📊
     🎮 Arena Results Summary:
